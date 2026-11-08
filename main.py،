@@ -1,5 +1,12 @@
 # telegram-mp3-bot
 import os
+import logging
+import imageio_ffmpeg
+
+logging.basicConfig(level=logging.INFO)
+os.environ["PATH"] += os.pathsep + os.path.dirname(
+    imageio_ffmpeg.get_ffmpeg_exe()
+)
 import asyncio
 import tempfile
 from pathlib import Path
@@ -92,10 +99,8 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.delete()
 
     except Exception:
-        await message.edit_text(
-            "محصلش تحويل. تأكد إن الرابط عام وإن الفيديو متاح."
-        )
-
+    logging.exception("Conversion failed")
+    await message.edit_text("حصل خطأ أثناء التحويل.")
 
 def main():
     app = Application.builder().token(TOKEN).build()
