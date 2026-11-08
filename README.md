@@ -1,1 +1,110 @@
 # telegram-mp3-bot
+import os
+import asyncio
+import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
+
+import yt_dlp
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+
+TOKEN = os.environ["BOT_TOKEN"]
+
+
+def valid_url(url):
+    host = urlparse(url).netloc.lower().split(":")[0]
+    allowed = (
+        "youtube.com",
+        "www.youtube.com",
+        "youtu.be",
+        "m.youtube.com",
+        "tiktok.com",
+        "www.tiktok.com",
+        "vm.tiktok.com",
+        "vt.tiktok.com",
+    )
+    return any(host == domain or host.endswith("." + domain)
+               for domain in allowed)
+
+
+def convert_video(url, folder):
+    options = {
+        "format": "bestaudio/best",
+        "outtmpl": str(Path(folder) / "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+    }
+
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = Path(ydl.prepare_filename(info)).with_suffix(".mp3")
+
+    if not filename.exists():
+        raise Exception("MP3 file not found")
+
+    return filename
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "أهلاً! ابعت رابط فيديو YouTube أو TikTok عام تملكه، "
+        "وهحوّله لك إلى MP3."
+    )
+
+
+async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+
+    if not valid_url(url):
+        await update.message.reply_text("ابعت رابط YouTube أو TikTok صحيح.")
+        return
+
+    message = await update.message.reply_text("جاري تحويل الفيديو إلى MP3...")
+
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            audio = await asyncio.to_thread(convert_video, url, folder)
+
+            if audio.stat().st_size > 49 * 1024 * 1024:
+                await message.edit_text("حجم ملف الصوت أكبر من الحد المسموح.")
+                return
+
+            with open(audio, "rb") as file:
+                await update.message.reply_audio(
+                    audio=file,
+                    filename="audio.mp3",
+                    title="Converted Audio",
+                )
+
+        await message.delete()
+
+    except Exception:
+        await message.edit_text(
+            "محصلش تحويل. تأكد إن الرابط عام وإن الفيديو متاح."
+        )
+
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_link))
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
